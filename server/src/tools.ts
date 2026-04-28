@@ -5,6 +5,7 @@ import type { Node } from "./node.js";
 import { toolInputSchemas } from "./schema.js";
 import type { BridgeResponse } from "./types.js";
 import { Follower } from "./follower.js";
+import { logToolCall, initLogger } from "./logger.js";
 
 type ToolResult = {
   content: Array<{ type: "text"; text: string }>;
@@ -50,15 +51,20 @@ interface SaveScreenshotItemResult {
   error?: string;
 }
 
-export function registerTools(
+export async function registerTools(
   server: McpServer,
   node: Node,
   port: number
-): void {
+): Promise<void> {
+  // Initialize logger
+  await initLogger();
+
+  const log = createToolLogger("list_files", node.roleName);
   server.tool(
     "list_files",
     "List all currently connected Figma files. Returns fileKey and fileName for each. Use the fileKey to target a specific file in other tools.",
     async (): Promise<ToolResult> => {
+      const startTime = Date.now();
       try {
         let files = node.listConnectedFiles();
         if (files === undefined) {
@@ -66,10 +72,12 @@ export function registerTools(
           const follower = new Follower(`http://localhost:${port}`);
           files = await follower.listConnectedFiles();
         }
+        await log(startTime, 0, true);
         return {
           content: [{ type: "text", text: JSON.stringify(files) }],
         };
       } catch (err) {
+        await log(startTime, 0, false, err instanceof Error ? err.message : String(err));
         return {
           content: [
             {
@@ -83,103 +91,137 @@ export function registerTools(
     }
   );
 
+  const logGetDocument = createToolLogger("get_document", node.roleName);
   server.tool(
     "get_document",
     "Get the current Figma page document tree. When multiple files are connected, specify fileKey.",
     toolInputSchemas.get_document.shape,
     async ({ fileKey }): Promise<ToolResult> => {
-      return renderResponse(() =>
+      const startTime = Date.now();
+      const result = await renderResponse(() =>
         node.send("get_document", undefined, fileKey)
       );
+      await logGetDocument(startTime, estimateTokens(result), result.isError !== true);
+      return result;
     }
   );
 
+  const logGetSelection = createToolLogger("get_selection", node.roleName);
   server.tool(
     "get_selection",
     "Get the currently selected nodes in Figma. When multiple files are connected, specify fileKey.",
     toolInputSchemas.get_selection.shape,
     async ({ fileKey }): Promise<ToolResult> => {
-      return renderResponse(() =>
+      const startTime = Date.now();
+      const result = await renderResponse(() =>
         node.send("get_selection", undefined, fileKey)
       );
+      await logGetSelection(startTime, estimateTokens(result), result.isError !== true);
+      return result;
     }
   );
 
+  const logGetNode = createToolLogger("get_node", node.roleName);
   server.tool(
     "get_node",
     "Get a specific Figma node by ID. Must use colon format, e.g. '4029:12345', never use hyphens. When multiple files are connected, specify fileKey.",
     toolInputSchemas.get_node.shape,
     async ({ nodeId, fileKey }): Promise<ToolResult> => {
-      return renderResponse(() => node.send("get_node", [nodeId], fileKey));
+      const startTime = Date.now();
+      const result = await renderResponse(() => node.send("get_node", [nodeId], fileKey));
+      await logGetNode(startTime, estimateTokens(result), result.isError !== true);
+      return result;
     }
   );
 
+  const logGetStyles = createToolLogger("get_styles", node.roleName);
   server.tool(
     "get_styles",
     "Get all local styles in the document. When multiple files are connected, specify fileKey.",
     toolInputSchemas.get_styles.shape,
     async ({ fileKey }): Promise<ToolResult> => {
-      return renderResponse(() => node.send("get_styles", undefined, fileKey));
+      const startTime = Date.now();
+      const result = await renderResponse(() => node.send("get_styles", undefined, fileKey));
+      await logGetStyles(startTime, estimateTokens(result), result.isError !== true);
+      return result;
     }
   );
 
+  const logGetMetadata = createToolLogger("get_metadata", node.roleName);
   server.tool(
     "get_metadata",
     "Get metadata about the current Figma document including file name, pages, and current page info. When multiple files are connected, specify fileKey.",
     toolInputSchemas.get_metadata.shape,
     async ({ fileKey }): Promise<ToolResult> => {
-      return renderResponse(() =>
+      const startTime = Date.now();
+      const result = await renderResponse(() =>
         node.send("get_metadata", undefined, fileKey)
       );
+      await logGetMetadata(startTime, estimateTokens(result), result.isError !== true);
+      return result;
     }
   );
 
+  const logGetDesignContext = createToolLogger("get_design_context", node.roleName);
   server.tool(
     "get_design_context",
     "Get the design context for the current selection or page. Returns a summarized tree structure optimized for understanding the current design context. When multiple files are connected, specify fileKey.",
     toolInputSchemas.get_design_context.shape,
     async ({ depth, fileKey }): Promise<ToolResult> => {
+      const startTime = Date.now();
       const params: Record<string, unknown> = {};
       if (depth !== undefined && depth > 0) {
         params.depth = depth;
       }
-      return renderResponse(() =>
+      const result = await renderResponse(() =>
         node.sendWithParams("get_design_context", undefined, params, fileKey)
       );
+      await logGetDesignContext(startTime, estimateTokens(result), result.isError !== true);
+      return result;
     }
   );
 
+  const logGetVariableDefs = createToolLogger("get_variable_defs", node.roleName);
   server.tool(
     "get_variable_defs",
     "Get all local variable definitions including variable collections, modes, and variable values. Variables are Figma's system for design tokens (colors, numbers, strings, booleans). When multiple files are connected, specify fileKey.",
     toolInputSchemas.get_variable_defs.shape,
     async ({ fileKey }): Promise<ToolResult> => {
-      return renderResponse(() =>
+      const startTime = Date.now();
+      const result = await renderResponse(() =>
         node.send("get_variable_defs", undefined, fileKey)
       );
+      await logGetVariableDefs(startTime, estimateTokens(result), result.isError !== true);
+      return result;
     }
   );
 
+  const logGetScreenshot = createToolLogger("get_screenshot", node.roleName);
   server.tool(
     "get_screenshot",
     "Export a screenshot of the selected nodes or specific nodes by ID. Returns base64-encoded image data. When multiple files are connected, specify fileKey.",
     toolInputSchemas.get_screenshot.shape,
     async ({ nodeIds, format, scale, fileKey }): Promise<ToolResult> => {
+      const startTime = Date.now();
       const params: Record<string, unknown> = {};
       if (format) params.format = format;
       if (scale !== undefined && scale > 0) params.scale = scale;
-      return renderResponse(() =>
+      const result = await renderResponse(() =>
         node.sendWithParams("get_screenshot", nodeIds, params, fileKey)
       );
+      await logGetScreenshot(startTime, estimateTokens(result), result.isError !== true);
+      return result;
     }
   );
 
+  const logSaveScreenshots = createToolLogger("save_screenshots", node.roleName);
   server.tool(
     "save_screenshots",
     "Export screenshots for multiple nodes and save them directly to the local filesystem. Returns metadata only (no base64). When multiple files are connected, specify fileKey.",
     toolInputSchemas.save_screenshots.shape,
     async ({ items, format, scale, fileKey }): Promise<ToolResult> => {
       try {
+        const startTime = Date.now();
         // Create a sender bound to the specific fileKey
         const sender: ScreenshotSender = {
           sendWithParams: (requestType, nodeIds, params) =>
@@ -191,10 +233,14 @@ export function registerTools(
           format,
           scale
         );
+        const outputText = JSON.stringify(result);
+        await logSaveScreenshots(startTime, estimateTokens({ content: [{ type: "text" as const, text: outputText }] }), !result.hasErrors);
         return {
-          content: [{ type: "text", text: JSON.stringify(result) }],
+          content: [{ type: "text", text: outputText }],
         };
       } catch (err) {
+        const startTime = Date.now();
+        await logSaveScreenshots(startTime, 0, false, err instanceof Error ? err.message : String(err));
         return {
           content: [
             {
@@ -441,4 +487,38 @@ function resolveScale(
 
 function isNodeError(err: unknown): err is NodeJS.ErrnoException {
   return err instanceof Error;
+}
+
+/**
+ * Create a wrapper function that logs tool calls with token usage.
+ */
+function createToolLogger(
+  toolName: string,
+  roleName: string
+): (startTime: number, tokensUsed: number, success: boolean, error?: string) => Promise<void> {
+  return async (startTime: number, tokensUsed: number, success: boolean, error?: string) => {
+    const durationMs = Date.now() - startTime;
+    await logToolCall({
+      timestamp: new Date().toISOString(),
+      toolName,
+      durationMs,
+      tokensUsed,
+      role: roleName,
+      success,
+      error,
+    });
+  };
+}
+
+/**
+ * Estimate token count from a ToolResult based on text content length.
+ * Rough approximation: ~4 characters per token.
+ */
+function estimateTokens(result: ToolResult): number {
+  let textLength = 0;
+  for (const part of result.content) {
+    textLength += part.text.length;
+  }
+  // Rough estimate: ~4 characters per token for JSON content
+  return Math.max(1, Math.ceil(textLength / 4));
 }
